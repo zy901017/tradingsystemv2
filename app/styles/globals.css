@@ -1,0 +1,16 @@
+:root { --bg:#0b1020; --card:#12193a; --text:#e7ebff; --muted:#9fb0ff; }
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Arial}
+a{color:#9ecbff;text-decoration:none}
+.card{background:var(--card);border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08);font-size:14px}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#24306b;color:#c8d6ff;font-size:12px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.kpi{font-size:28px;font-weight:700}
+.muted{color:var(--muted);font-size:12px}
+.input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2b3e75;background:#0e1530;color:var(--text)}
+.btn{background:#3a5bd7;color:#fff;border:none;padding:10px 14px;border-radius:10px;cursor:pointer}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+h1{margin:0 0 12px 0} h2{margin:24px 0 12px} h3{margin:16px 0 8px}
+.flex{display:flex;gap:12px;align-items:center}
