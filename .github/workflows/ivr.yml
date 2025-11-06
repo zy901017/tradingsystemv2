@@ -2,8 +2,8 @@ name: Build True IVR (30D ATM)
 
 on:
   schedule:
-    - cron: '45 10 * * *'     # 每天 10:45 UTC
-  workflow_dispatch:           # 允许手动触发
+    - cron: '45 10 * * *'       # 每天 10:45 UTC
+  workflow_dispatch:             # 允许手动触发
 
 permissions:
   contents: write
@@ -34,7 +34,7 @@ jobs:
           if [ -z "${{ secrets.MASSIVE_API_KEY }}" ]; then
             echo "MASSIVE_API_KEY is EMPTY or not configured" && exit 1
           else
-            echo "MASSIVE_API_KEY is set (length masked by GitHub)."
+            echo "MASSIVE_API_KEY is set (masked)."
           fi
 
       - name: Compute IVR series
@@ -46,11 +46,19 @@ jobs:
           python --version
           python scripts/build_ivr_series.py
 
+      - name: Upload precomputed as artifact (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: precomputed-after-run
+          path: precomputed
+          if-no-files-found: warn
+
       - name: Commit & push IVR snapshots
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A precomputed || true
+          git status
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
