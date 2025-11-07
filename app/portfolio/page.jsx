@@ -1,44 +1,41 @@
 'use client'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import '../globals.css'
+import { fmt } from '../../src/lib/utils'
+
+async function getJSON(url){ const r = await fetch(url, { cache:'no-store' }); if(!r.ok) throw new Error(await r.text()); return r.json() }
 
 export default function Portfolio(){
-  const [data,setData]=useState(null)
+  const [rows,setRows]=useState([])
   const [err,setErr]=useState('')
-  const [prices,setPrices]=useState({})
 
-  useEffect(()=>{
-    fetch('/api/ibkr/positions').then(r=>r.json()).then(async j=>{
-      if(j.error){ setErr(j.error); return }
-      setData(j.positions||[])
-      const token = process.env.NEXT_PUBLIC_FINNHUB_TOKEN || ''
-      async function quote(sym){
-        try{
-          const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${token}`)
-          const j=await r.json(); return j.c || null
-        }catch(e){ return null }
-      }
-      const out={}
-      for(const p of j.positions||[]){ out[p.symbol]=await quote(p.symbol) }
-      setPrices(out)
-    }).catch(e=>setErr(String(e)))
-  },[])
+  useEffect(()=>{ (async ()=>{
+    try{
+      const j = await getJSON('/api/ibkr/positions')
+      if(j && Array.isArray(j.positions)) setRows(j.positions)
+      else if(j.error) setErr(j.error)
+    }catch(e){ setErr(String(e)) }
+  })() },[])
 
-  return <div style={{padding:16}}>
+  return (<main>
     <h1>Portfolio</h1>
-    {err && <div className="card">Error: {err}</div>}
-    <div className="card">
-      <table style={{width:'100%'}}>
-        <thead><tr><th>Symbol</th><th>Qty</th><th>Avg</th><th>Mark</th><th>Live</th><th>P&L</th></tr></thead>
-        <tbody>
-          {(data||[]).map((p,i)=>{
-            const live=prices[p.symbol]??p.mkt
-            const pnl = (live - p.avg) * p.qty
-            return <tr key={i}>
-              <td>{p.symbol}</td><td>{p.qty}</td><td>{p.avg?.toFixed?.(2)}</td><td>{p.mkt?.toFixed?.(2)}</td><td>{live?.toFixed?.(2)}</td><td style={{color:pnl>=0?'#6cff8f':'#ff6c6c'}}>{pnl?.toFixed?.(2)}</td>
-            </tr>
-          })}
-        </tbody>
-      </table>
-    </div>
-  </div>
+    {err && <div className="card" style={{borderColor:'#a33'}}>错误：{String(err)}</div>}
+    <div className="card"><div style={{overflowX:'auto'}}>
+      <table><thead><tr>
+        <th style={{textAlign:'left'}}>symbol</th><th>qty</th><th>avgCost</th><th>mark</th><th>P&L</th>
+      </tr></thead><tbody>
+        {rows.map((r,i)=>(
+          <tr key={i}>
+            <td style={{textAlign:'left'}}>{r.symbol}</td>
+            <td>{r.qty}</td>
+            <td>{fmt(r.avgCost)}</td>
+            <td>{fmt(r.mark)}</td>
+            <td>{fmt((r.mark - r.avgCost)*r.qty)}</td>
+          </tr>
+        ))}
+      </tbody></table>
+    </div></div>
+    <p className="mono">返回 <Link href="/">首页</Link></p>
+  </main>)
 }

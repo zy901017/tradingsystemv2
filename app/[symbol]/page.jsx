@@ -1,168 +1,129 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import '../globals.css'
+import { fmt } from '../../src/lib/utils'
+
+async function getJSON(url){
+  const r = await fetch(url, { cache:'no-store' })
+  if(!r.ok){
+    let msg
+    try{ msg = await r.text() }catch{ msg = r.statusText }
+    throw new Error(msg||`HTTP ${r.status}`)
+  }
+  return r.json()
+}
 
 export default function SymbolPage({ params }){
-  const symbol = decodeURIComponent(params.symbol).toUpperCase()
+  const symbol = (params.symbol||'').toUpperCase()
+  const [ivr,setIVR]=useState(null)
   const [chain,setChain]=useState([])
-  const [ivr,setIvr]=useState(null)
-  const [ind,setInd]=useState(null)
   const [news,setNews]=useState([])
-  const [bs,setBs]=useState(null)
-  const [spx,setSpx]=useState(()=>localStorage.getItem('spx_pct')||'')
-  const [ndx,setNdx]=useState(()=>localStorage.getItem('ndx_pct')||'')
+  const [ind,setInd]=useState(null)
+  const [manualSPX,setManualSPX]=useState('')
+  const [manualNDX,setManualNDX]=useState('')
+  const [bear,setBear]=useState(null)
+  const [err,setErr]=useState('')
 
   useEffect(()=>{
-    fetch(`/api/options/massive?symbol=${symbol}`).then(r=>r.json()).then(j=>{
-      const rows = Array.isArray(j)? j : (j.results||j.data||j.options||j.contracts||[])
-      setChain(rows)
-    }).catch(()=>{})
-
-    fetch(`/api/ivr?symbol=${symbol}`).then(r=>r.json()).then(setIvr).catch(()=>{})
-    fetch(`/api/indicators?symbol=${symbol}`).then(r=>r.json()).then(setInd).catch(()=>{})
-    fetch(`/api/news?symbol=${symbol}`).then(r=>r.json()).then(setNews).catch(()=>{})
+    let alive=true
+    ;(async ()=>{
+      try{
+        const [ivrJ, chJ, nJ, indJ] = await Promise.all([
+          getJSON(`/api/ivr?symbol=${symbol}`),
+          getJSON(`/api/options/massive?symbol=${symbol}`),
+          getJSON(`/api/news?symbol=${symbol}`),
+          getJSON(`/api/indicators?symbol=${symbol}`)
+        ])
+        if(!alive) return
+        setIVR(ivrJ); setChain(chJ.options||[]); setNews(nJ.news||[]); setInd(indJ||null)
+      }catch(e){ setErr(String(e)) }
+    })()
+    return ()=>{ alive=false }
   },[symbol])
 
-  function calcBear(){
-    const qs = new URLSearchParams()
-    if(spx) qs.set('spx_pct', spx)
-    if(ndx) qs.set('ndx_pct', ndx)
-    fetch(`/api/bearscore?`+qs.toString()).then(r=>r.json()).then(setBs)
-    localStorage.setItem('spx_pct', spx||'')
-    localStorage.setItem('ndx_pct', ndx||'')
+  async function calcBear(){
+    try{
+      const qs = []
+      if(manualSPX) qs.push(`spx_pct=${Number(manualSPX)}`)
+      if(manualNDX) qs.push(`ndx_pct=${Number(manualNDX)}`)
+      const url = `/api/bearscore${qs.length?`?${qs.join('&')}`:''}`
+      const j = await getJSON(url)
+      setBear(j)
+    }catch(e){ setErr(String(e)) }
   }
 
-  function greek(v){ return (v==null||isNaN(v))?'-':(+v).toFixed(3) }
-
-  const mapped = useMemo(()=>{
-    const rows = chain.map(r=>({ 
-      expiry: r.expiration_date || r.expiry || r.expiration || r.exp_date,
-      type: (r.type || r.option_type || '').toUpperCase().slice(0,1),
-      strike: +(r.strike||0),
-      bid: +(r.bid ?? r.best_bid ?? 0),
-      ask: +(r.ask ?? r.best_ask ?? 0),
-      last: +(r.last ?? r.price ?? 0),
-      iv: +(r.implied_volatility ?? r.iv ?? 0),
-      delta: +(r.delta ?? r.greeks_delta ?? r.greeks?.delta ?? 0),
-      gamma: +(r.gamma ?? r.greeks_gamma ?? r.greeks?.gamma ?? 0),
-      theta: +(r.theta ?? r.greeks_theta ?? r.greeks?.theta ?? 0),
-      vega:  +(r.vega  ?? r.greeks_vega  ?? r.greeks?.vega  ?? 0),
-      oi: +(r.open_interest ?? r.oi ?? 0),
-      volume: +(r.volume ?? 0),
-    }))
-    return rows.slice(0, 2000)
-  },[chain])
-
-  function strategy(){
-    const ivrVal = ivr?.ivr ?? null
-    const rsi = ind?.rsi?.[ind.rsi.length-1] ?? null
-    const bull = rsi!=null ? rsi>55 : null
-    const ivHigh = ivrVal!=null ? ivrVal>=60 : null
-    const ivLow  = ivrVal!=null ? ivrVal<=30 : null
-    let title='Neutral income'
-    let legs=[]; let note=''
-    if(ivHigh){
-      title='Short premium (defined risk)'
-      note='IVR 高 → Iron Condor / BWB / Calendar 收租；30–50% 收益止盈。'
-      const atm = mapped.sort((a,b)=>Math.abs(a.delta-0.5)-Math.abs(b.delta-0.5))[0]?.strike
-      if(atm){
-        legs=[
-          { t:'Sell', side:'Call',  k:(atm*1.03).toFixed(2) },
-          { t:'Buy',  side:'Call',  k:(atm*1.06).toFixed(2) },
-          { t:'Sell', side:'Put',   k:(atm*0.97).toFixed(2) },
-          { t:'Buy',  side:'Put',   k:(atm*0.94).toFixed(2) },
-        ]
-      }
-    }else if(ivLow && bull){
-      title='Debit bullish (Diagonal/Vertical)'
-      note='IVR 低 + 看多 → 倾向买入借记策略；盈利20–30% 或趋势破坏止盈/损。'
-      const atm = mapped.sort((a,b)=>Math.abs(a.delta-0.35)-Math.abs(b.delta-0.35))[0]?.strike
-      if(atm){
-        legs=[
-          { t:'Buy',  side:'Call', k:(atm*1.00).toFixed(2), tenor:'60–90D' },
-          { t:'Sell', side:'Call', k:(atm*1.05).toFixed(2), tenor:'7–14D' }
-        ]
-      }
-    }else{
-      title='Neutral calendar'
-      note='不确定时用日历/对角收 Theta；近月腿剩余1–3天滚动。'
-      const atm = mapped.sort((a,b)=>Math.abs(a.delta-0.5)-Math.abs(b.delta-0.5))[0]?.strike
-      if(atm){
-        legs=[
-          { t:'Buy',  side:'Call', k:(atm*1.00).toFixed(2), tenor:'~90D' },
-          { t:'Sell', side:'Call', k:(atm*1.00).toFixed(2), tenor:'7–14D' }
-        ]
-      }
-    }
-    return { title, note, legs, ivr:ivrVal, rsiLast:rsi }
-  }
-
-  const sug = strategy()
-
-  return <div style={{padding:16}}>
+  return (<main>
     <h1>{symbol}</h1>
-    <div className="grid" style={{gridTemplateColumns:'repeat(12,1fr)'}}>
+    {err && <div className="card" style={{borderColor:'#a33'}}>错误：{String(err)}</div>}
 
-      <div className="card" style={{gridColumn:'span 6'}}>
-        <h3>True IVR / Proxy</h3>
-        <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(ivr,null,2)}</pre>
-        <button onClick={()=>fetch('/api/ivr/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol})})}>登记到 True IVR 计算清单</button>
-      </div>
-
-      <div className="card" style={{gridColumn:'span 6'}}>
-        <h3>Manual Breadth (SPX/NDX %&gt;200DMA)</h3>
-        <div style={{display:'flex', gap:8, alignItems:'center'}}>
-          <label>SPX %</label><input value={spx} onChange={e=>setSpx(e.target.value)} style={{width:90}}/>
-          <label>NDX %</label><input value={ndx} onChange={e=>setNdx(e.target.value)} style={{width:90}}/>
-          <button onClick={calcBear}>计算</button>
+    <div className="row">
+      <section className="card col">
+        <h3>IVR / 代理</h3>
+        <div><small className="mono">method</small>：{ivr?.method || '-'}</div>
+        <div><small className="mono">ivr(30d/1y)</small>：{ivr?.ivr ?? '-'}</div>
+        <div><small className="mono">current(30dHV)</small>：{fmt(ivr?.current)}</div>
+        <div style={{marginTop:10}}>
+          <label>手动广度 SPX%：</label>
+          <input value={manualSPX} onChange={e=>setManualSPX(e.target.value)} placeholder="例如 55.4" style={{width:120, marginRight:8}} />
+          <label>NDX%：</label>
+          <input value={manualNDX} onChange={e=>setManualNDX(e.target.value)} placeholder="例如 60.2" style={{width:120, marginRight:8}} />
+          <button onClick={calcBear}>计算 BearScore</button>
+          {bear && <div style={{marginTop:8}}>width: {fmt(bear.width,3)} ｜ bearScore: {bear.bearScore} ｜ <small className="mono">{bear.source}</small></div>}
         </div>
-        <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(bs,null,2)}</pre>
-      </div>
+      </section>
 
-      <div className="card" style={{gridColumn:'span 12'}}>
-        <h3>Options Chain (raw Greeks)</h3>
-        <div style={{maxHeight:400, overflow:'auto'}}>
-          <table style={{width:'100%'}}>
-            <thead><tr>
-              <th>Expiry</th><th>T</th><th>Strike</th><th>Bid</th><th>Ask</th><th>Last</th>
-              <th>IV</th><th>Δ</th><th>Γ</th><th>Θ</th><th>Vega</th><th>OI</th><th>Vol</th>
-            </tr></thead>
-            <tbody>
-              {mapped.slice(0,1000).map((r,i)=>(
-                <tr key={i}>
-                  <td>{r.expiry}</td><td>{r.type}</td><td>{r.strike?.toFixed?.(2)}</td>
-                  <td>{r.bid?.toFixed?.(2)}</td><td>{r.ask?.toFixed?.(2)}</td><td>{r.last?.toFixed?.(2)}</td>
-                  <td>{r.iv?.toFixed?.(2)}</td><td>{greek(r.delta)}</td><td>{greek(r.gamma)}</td>
-                  <td>{greek(r.theta)}</td><td>{greek(r.vega)}</td><td>{r.oi}</td><td>{r.volume}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="card" style={{gridColumn:'span 6'}}>
-        <h3>Indicators</h3>
-        <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify({ 
-          rsi: ind?.rsi?.[ind.rsi?.length-1], 
-          macd: ind?.macd?.[ind.macd?.length-1], 
-          ema20: ind?.ema20?.[ind.ema20?.length-1], 
-          ema50: ind?.ema50?.[ind.ema50?.length-1], 
-          ema200: ind?.ema200?.[ind.ema200?.length-1] }, null, 2)}</pre>
-      </div>
-
-      <div className="card" style={{gridColumn:'span 6'}}>
-        <h3>Strategy suggestion</h3>
-        <p><b>{sug.title}</b></p>
-        <p>{sug.note}</p>
-        <pre>{JSON.stringify(sug.legs,null,2)}</pre>
-      </div>
-
-      <div className="card" style={{gridColumn:'span 12'}}>
-        <h3>News</h3>
-        <ul>
-          {news.map((n,i)=>(<li key={i}><a href={n.url} target="_blank">{n.headline||n.source}</a> <small>{new Date(n.datetime*1000||Date.parse(n.datetime||'')).toLocaleString()}</small></li>))}
-        </ul>
-      </div>
+      <section className="card col">
+        <h3>指标（D）</h3>
+        {ind ? (
+          <ul style={{lineHeight:1.6}}>
+            <li>EMA20/50/200：{fmt(ind.ema20)}/{fmt(ind.ema50)}/{fmt(ind.ema200)}</li>
+            <li>RSI(14)：{fmt(ind.rsi)}</li>
+            <li>MACD：{fmt(ind.macd?.macd,2)} / signal {fmt(ind.macd?.signal,2)} / hist {fmt(ind.macd?.hist,2)}</li>
+            <li>VWAP：{fmt(ind.vwap)}</li>
+          </ul>
+        ) : '—'}
+      </section>
     </div>
-  </div>
+
+    <section className="card">
+      <h3>Options Chain（Massive 原生希腊）</h3>
+      <div style={{overflowX:'auto'}}>
+        <table><thead><tr>
+          <th style={{textAlign:'left'}}>exp</th><th>type</th><th>strike</th><th>bid</th><th>ask</th><th>mid</th>
+          <th>IV</th><th>Δ</th><th>Γ</th><th>Θ</th><th>Vega</th><th>OI</th><th>Vol</th>
+        </tr></thead><tbody>
+        {chain.slice(0,200).map((r,i)=>(
+          <tr key={i}>
+            <td style={{textAlign:'left'}}>{r.exp||r.expiration||'-'}</td>
+            <td>{r.type||r.right||'-'}</td>
+            <td>{fmt(r.strike||r.strikePrice,2)}</td>
+            <td>{fmt(r.bid)}</td>
+            <td>{fmt(r.ask)}</td>
+            <td>{fmt(r.mid)}</td>
+            <td>{fmt(r.iv)}</td>
+            <td>{fmt(r.delta)}</td>
+            <td>{fmt(r.gamma)}</td>
+            <td>{fmt(r.theta)}</td>
+            <td>{fmt(r.vega)}</td>
+            <td>{r.oi??r.openInterest??'-'}</td>
+            <td>{r.volume??'-'}</td>
+          </tr>
+        ))}
+        </tbody></table>
+      </div>
+    </section>
+
+    <section className="card">
+      <h3>News（14d）</h3>
+      <ul>
+        {news?.slice?.(0,20).map((n,i)=>(
+          <li key={i}><a href={n.url} target="_blank" rel="noreferrer">{n.headline}</a>
+            <span style={{marginLeft:8}} className="mono">{new Date(n.datetime*1000).toLocaleString()}</span></li>
+        ))}
+      </ul>
+    </section>
+
+    <p className="mono">返回 <Link href="/">首页</Link> ｜ 打开 <Link href="/portfolio">/portfolio</Link></p>
+  </main>)
 }
