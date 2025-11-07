@@ -1,0 +1,54 @@
+name: Build True IVR (30D ATM)
+
+on:
+  schedule:
+    - cron: '45 10 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Collect symbols (IBKR + watchlist)
+        id: collect
+        env:
+          IBKR_FLEX_TOKEN: ${{ secrets.IBKR_FLEX_TOKEN }}
+          IBKR_TRADES_QUERY_ID: ${{ secrets.IBKR_TRADES_QUERY_ID }}
+          IBKR_POSITIONS_QUERY_ID: ${{ secrets.IBKR_POSITIONS_QUERY_ID }}
+        run: |
+          python scripts/collect_symbols.py > /tmp/syms.txt
+          echo "symbols=$(cat /tmp/syms.txt)" >> $GITHUB_ENV
+          echo "Symbols: $(cat /tmp/syms.txt)"
+
+      - name: Compute IVR series
+        env:
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+          MASSIVE_BASE_URL: https://api.massive.com
+          IVR_SYMBOLS: ${{ env.symbols }}
+        run: |
+          python scripts/build_ivr_series.py || true
+
+      - name: Commit & push IVR snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A precomputed || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update IVR snapshots"
+            git push
+          fi
