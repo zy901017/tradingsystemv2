@@ -1,0 +1,1 @@
+export function fmtPct(x,d=1){if(x==null||isNaN(x))return'-';return (x*100).toFixed(d)+'%'};export function clamp(x,a=0,b=1){return Math.max(a,Math.min(b,x))};export function sum(a){return a.reduce((x,y)=>x+(+y||0),0)}
