@@ -6,14 +6,23 @@ async function fetchJSON(url, opts={}){
   return r.json()
 }
 
-function hvPercentile(series, window=252){
-  if(!series?.length) return null
-  const arr = series.slice(-window)
-  const x = arr[arr.length-1]
-  const sorted = [...arr].sort((a,b)=>a-b)
-  let i=0; for(const v of sorted){ if(v<=x) i++ else break }
-  return +(i/sorted.length*100).toFixed(1)
+function hvPercentile(series, window = 252) {
+  if (!series || !series.length) return null;
+  const arr = series.slice(-window);
+  if (!arr.length) return null;                  // 新增：防 0 长度
+  const x = arr[arr.length - 1];
+  const sorted = [...arr].sort((a, b) => a - b);
+  let i = 0;
+  for (const v of sorted) {
+    if (v <= x) {
+      i++;
+    } else {
+      break;
+    }
+  }
+  return Number(((i / sorted.length) * 100).toFixed(1));
 }
+
 
 export async function GET(req){
   const { searchParams } = new URL(req.url)
