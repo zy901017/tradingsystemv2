@@ -14,7 +14,5 @@
     "react-dom": "18.2.0",
     "styled-jsx": "5.1.1"
   },
-  "engines": {
-    "node": ">=18.17 <=20.x"
-  }
+  "engines": { "node": ">=18.17 <=20.x" }
 }
